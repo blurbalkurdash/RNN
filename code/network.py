@@ -33,7 +33,7 @@ if __name__ == '__main__':
     sequence_length = 10
     
     #generate the sequences
-    X = np.zeros(num_samples,sequence_length)
+    X = np.zeros((num_samples,sequence_length))
     for row_index in range(num_samples):
         X[row_index,:] = np.around(np.random.rand(sequence_length)).astype(int)
     #label sequences with targets
@@ -134,7 +134,89 @@ if __name__ == '__main__':
     that the gradient computed by backpropagation is close to the numetical gradient
     ---------------------------------------------------------------------------
     """
+    #set the weight parameters used during gradient checking
+    params = [1.2, 1.2] #[wx,wRec]
+    #set gradient tolerance
+    epsilon = 1e-7
+    #compute the backprop gradients...
+    S = forward_states(X,params[0],params[1])
+    grad_out = output_gradient(S[:,-1],t)
+    backprop_grads, grad_over_time = backward_gradient(X,S,grad_out,params[1])
+    #compute the numerical gradient for each parameter in the layer
+    for param_index in enumerate(params):
+        grad_backprop = backprop_grads[param_index]
+        #add small amout...
+        params[param_index] += epsilon #compute upper bound tolerance
+        plus_loss = loss(forward_states(X,params[0],params[1])[:,-1],t)
+        params[param_index] -= 2 * epsilon #compure lower bound tolerance
+        min_loss = loss(forward_states(X,params[0],params[1])[:,-1],t)
+        params[param_index] += epsilon #reset params array
+        
+        #calculate numerical gradient
+        numeric_gradient = (plus_loss - min_loss)/(2*epsilon)
+        
+        #raise error if not within tolerance
+        if not np.isclose(numeric_gradient,grad_backprop):
+            raise ValueError((f'Numerical gradient of {numeric_gradient:.6f} is not close to 'f'the backpropagation gradient of {grad_backprop:.6f}!'))
+    print('no gradient errors found')
+
     
+    """
+    ---------------------------------------------------------------------------
+    Recurrant nets are notoriously dificult to train due to unstable gradients
+    which make it difficult for more simple gradient based optimization methods,
+    such as SGD. to find a good local minimum.
     
-            
-            
+    the instabilities arise from the fact that the recurrence relation to propagate
+    the gradient backwards through time forms a geometric series. this can be 
+    optimized out using Rprop (resiliant backprop) optimization.
+    
+    Rprop is similar to the momentum method, but uses only the the sign of the 
+    gradient to update the parameters.
+    ---------------------------------------------------------------------------
+    """
+#define Rpeop optimisation function
+    def update_rprop(X,t,W,W_prev_sign,W_delta,eta_p,eta_n):
+        """
+        Update Rprop Values in one iteration.
+        Args:
+            X: input data.
+            t: targets
+            W: Current Weight Parameters
+            W_prev_sign: Previous sign of the W gradient.
+            W_deltaL Rprop update values.
+            eta_p, eta_n: Rprop Hyperperameters
+        Returns: (W_delta,W_sign): weight update and sign of last weight gradient.
+        """
+        #Perform forward and backwards pass to get the gradients
+        S = forward_states(X,W[0],W[1])
+        grad_out = output_gradient(S[:,-1],t)
+        W_grads, _ = backward_gradient(X,S,grad_out,W[1])
+        W_sign = np.sign(W_grads) #sign of new gradient
+        #update the delta (update value) for each weight parameter seperately
+        for i, _ in enumerate(W):
+            if W_sign == W_prev_sign[i]:
+                W_delta[i] *= eta_p
+            else:
+                W_delta[i] *= eta_n
+        return W_delta, W_sign
+
+#perform rprop optimization...
+    eta_p = 1.2
+    eta_n = 0.5
+    
+    #set initial parameters
+    W = [-1.5,2] #[Wx,WRec]
+    W_delta = [0.001,0.001] #update values (delta) forW
+    W_sign = [0,0] #Previos sign of W
+
+    ls_of_ws = [(W[0],W[1])] #list of weights to plot
+    
+    for i in range(500):
+        #get update values and sign of the last gradient
+        W_delta, Wsign = update_rprop(X,t,W,W_sign,W_delta,eta_p,eta_n)
+        #update each weight parameter seperately
+        for i, _ in enumerate(W):
+            W[i] -= W_sign[i] * W_delta[i]
+        ls_of_ws.append((W[0],W[1])) #add weights to list to plot
+    print(f'Final weights are: wx = {W[0]:.4f},  wRec = {W[1]:.4f}')          
